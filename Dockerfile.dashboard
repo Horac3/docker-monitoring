@@ -1,11 +1,47 @@
 FROM python:3.12-slim
 
-LABEL description="Docker Monitor Dashboard UI"
+LABEL description="Docker Monitor Dashboard UI (PWA)"
 
 WORKDIR /app
 
+# Install Pillow for icon generation at build time
+# Using --no-cache keeps the image lean; Pillow is only needed during build
+RUN pip install --no-cache-dir Pillow==10.4.0
+
+# Copy all dashboard assets
 COPY dashboard.html .
 COPY dashboard_server.py .
+COPY manifest.json .
+COPY sw.js .
+
+# Generate PWA icons inside the container at build time —
+# no need to run anything locally
+RUN python - <<'PYEOF'
+from PIL import Image, ImageDraw
+from pathlib import Path
+
+OUT = Path("/app/icons")
+OUT.mkdir(exist_ok=True)
+
+for size in (192, 512):
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    d   = ImageDraw.Draw(img)
+    d.rounded_rectangle([0, 0, size-1, size-1], radius=size//8, fill=(19, 22, 27, 255))
+    pad  = int(size * 0.10)
+    gap  = int(size * 0.08)
+    half = (size - 2*pad - gap) // 2
+    sw   = max(2, size // 48)
+    teal = (34, 211, 165, 255)
+    for x, y in [(pad, pad), (pad+half+gap, pad), (pad, pad+half+gap), (pad+half+gap, pad+half+gap)]:
+        d.rounded_rectangle([x, y, x+half, y+half], radius=max(2, size//32), outline=teal, width=sw)
+    img.save(OUT / f"icon-{size}.png")
+    print(f"  icon-{size}.png  ✓")
+
+# Screenshot for the PWA manifest (1280x720 dark placeholder)
+ss = Image.new("RGB", (1280, 720), (11, 13, 16))
+ss.save(OUT / "screenshot.png")
+print("  screenshot.png  ✓")
+PYEOF
 
 RUN mkdir -p /var/log/docker-monitor
 

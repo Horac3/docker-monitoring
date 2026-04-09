@@ -1,16 +1,13 @@
-version: "3.9"
-
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  Docker Memory Monitor — unified compose
-#  nginx-proxy + acme-companion are assumed to already be running on the
-#  shared "proxy" network (same setup as BillFlow).
+#  Resource Monitor — unified compose
+#  nginx-proxy + acme-companion are running on the shared "proxy" network.
 #
 #  Dashboard:  https://monitoring.never9to5ive.com
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 services:
 
-  # ── Monitor daemon (no HTTP — no domain needed) ───────────────────────────
+  # ── Monitor daemon ────────────────────────────────────────────────────────
   docker-monitor:
     build:
       context: .
@@ -20,6 +17,8 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - monitor-logs:/var/log/docker-monitor
+      # services.yml is reloaded every poll — edit without restarting
+      - ./services.yml:/etc/monitor/services.yml:ro
     environment:
       # ── Polling & thresholds ─────────────────────────────────────────
       POLL_INTERVAL:    "30"
@@ -35,11 +34,21 @@ services:
       ALERT_TO:   "${ALERT_TO}"
       ALERT_FROM: "${SMTP_USER}"
 
+      # ── Service checks config path ────────────────────────────────────
+      SERVICES_FILE: "/etc/monitor/services.yml"
+
       # ── Logging ──────────────────────────────────────────────────────
       LOG_LEVEL: "INFO"
+
+    # The monitor needs internet access to:
+    #   1. Reach smtp.gmail.com:587 for email alerts
+    #   2. Reach external URLs defined in services.yml HTTP checks
+    # Joining the proxy network gives it host-network-level egress via
+    # the same bridge nginx-proxy uses — same pattern as BillFlow.
     networks:
+      - nginx-proxy
       - internal
-    mem_limit: 128m
+    mem_limit: 192m   # bumped slightly for service check threads
 
   # ── Dashboard UI ──────────────────────────────────────────────────────────
   dashboard:
@@ -53,8 +62,6 @@ services:
     environment:
       DASHBOARD_PORT: "8080"
       LOG_DIR:        "/var/log/docker-monitor"
-
-      # ── Picked up by nginx-proxy + acme-companion automatically ──────
       VIRTUAL_HOST:      "monitoring.never9to5ive.com"
       VIRTUAL_PORT:      "8080"
       LETSENCRYPT_HOST:  "monitoring.never9to5ive.com"
@@ -69,7 +76,7 @@ services:
 # ── Networks ──────────────────────────────────────────────────────────────
 networks:
   nginx-proxy:
-    external: true   # shared network owned by your existing proxy stack
+    external: true
   internal:
     name: monitor-internal
 

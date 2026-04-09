@@ -1,0 +1,90 @@
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  services.yml  —  non-Docker service health checks
+#
+#  Mount this file into the monitor container (already done in
+#  docker-compose.yml) and edit it freely — the monitor reloads
+#  it on every poll cycle so changes take effect without restart.
+#
+#  Supported check types:
+#    http   — GET request; alert if status != expected_status (default 200)
+#             or if response time > timeout_ms (default 5000)
+#    tcp    — raw TCP connect to host:port; alert if refused/timeout
+#    ping   — ICMP ping (requires NET_RAW capability or root)
+#    process — alert if named process is NOT running on the host
+#    port   — alias for tcp
+#
+#  Common fields (all types):
+#    name         string   display name shown in dashboard and emails
+#    type         string   http | tcp | ping | process | port
+#    enabled      bool     set false to skip without deleting (default true)
+#    alert_after  int      consecutive failures before alerting (default 1)
+#    cooldown     int      seconds between repeat alerts (default 300)
+#    tags         list     grouping labels shown in dashboard
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+services:
+
+  # ── HTTP / HTTPS checks ───────────────────────────────────────────
+  - name: BillFlow API
+    type: http
+    url: https://api.never9to5ive.com/health
+    expected_status: 200
+    timeout_ms: 5000
+    alert_after: 2          # alert only after 2 consecutive failures
+    cooldown: 300
+    tags: [billflow, api]
+
+  - name: BillFlow Frontend
+    type: http
+    url: https://never9to5ive.com
+    expected_status: 200
+    timeout_ms: 5000
+    alert_after: 2
+    cooldown: 300
+    tags: [billflow, frontend]
+
+  - name: Docker Monitor Dashboard
+    type: http
+    url: https://monitoring.never9to5ive.com
+    expected_status: 200
+    timeout_ms: 5000
+    alert_after: 1
+    cooldown: 600
+    tags: [monitoring]
+
+  # ── TCP port checks ────────────────────────────────────────────────
+  - name: PostgreSQL
+    type: tcp
+    host: postgres-db     # Docker service name or IP
+    port: 5432
+    timeout_ms: 3000
+    alert_after: 2
+    cooldown: 300
+    tags: [database]
+
+  - name: Redis
+    type: tcp
+    host: redis-cache
+    port: 6379
+    timeout_ms: 2000
+    alert_after: 2
+    cooldown: 300
+    tags: [cache]
+
+  # ── Process checks (runs on host via /proc) ────────────────────────
+  - name: nginx process
+    type: process
+    process_name: nginx
+    alert_after: 1
+    cooldown: 120
+    tags: [proxy]
+
+  # ── Example: external service ──────────────────────────────────────
+  # - name: Stripe API
+  #   type: http
+  #   url: https://api.stripe.com/v1/
+  #   expected_status: 401    # 401 means reachable even without auth
+  #   timeout_ms: 8000
+  #   alert_after: 3
+  #   cooldown: 600
+  #   tags: [external, payments]
