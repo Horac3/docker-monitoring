@@ -1,11 +1,19 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" id="theme-color-meta" content="#0b0d10">
+<meta name="description" content="Docker container memory monitor with real-time alerts">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="DockerMon">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
 <title>Docker Resource Monitor</title>
 <style>
-  :root {
+  /* ── Theme tokens ── */
+  :root[data-theme="dark"] {
     --bg: #0b0d10;
     --surface: #13161b;
     --surface2: #1a1e26;
@@ -24,8 +32,42 @@
     --blue-dim: rgba(96,165,250,0.12);
     --purple: #a78bfa;
     --purple-dim: rgba(167,139,250,0.12);
-    --font: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
-    --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --chart-grid: rgba(255,255,255,0.04);
+    --chart-tick: #6b7280;
+    --json-bg: #0d0f12;
+    --json-key: #79c0ff;
+    --json-str: #a5d6ff;
+    --json-num: #f0883e;
+    --json-bool: #ff7b72;
+    --bar-track: rgba(255,255,255,0.06);
+  }
+  :root[data-theme="light"] {
+    --bg: #f4f6f9;
+    --surface: #ffffff;
+    --surface2: #f0f2f5;
+    --border: rgba(0,0,0,0.08);
+    --border-hover: rgba(0,0,0,0.16);
+    --text: #111827;
+    --text-muted: #6b7280;
+    --text-dim: #4b5563;
+    --green: #059669;
+    --green-dim: rgba(5,150,105,0.08);
+    --amber: #d97706;
+    --amber-dim: rgba(217,119,6,0.08);
+    --red: #dc2626;
+    --red-dim: rgba(220,38,38,0.08);
+    --blue: #2563eb;
+    --blue-dim: rgba(37,99,235,0.08);
+    --purple: #7c3aed;
+    --purple-dim: rgba(124,58,237,0.08);
+    --chart-grid: rgba(0,0,0,0.05);
+    --chart-tick: #9ca3af;
+    --json-bg: #f8fafc;
+    --json-key: #1d4ed8;
+    --json-str: #0369a1;
+    --json-num: #c2410c;
+    --json-bool: #be123c;
+    --bar-track: rgba(0,0,0,0.06);
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -33,9 +75,10 @@
   body {
     background: var(--bg);
     color: var(--text);
-    font-family: var(--font-ui);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     font-size: 14px;
     min-height: 100vh;
+    transition: background 0.25s, color 0.25s;
   }
 
   /* ── Header ── */
@@ -49,6 +92,7 @@
     position: sticky;
     top: 0;
     z-index: 100;
+    transition: background 0.25s, border-color 0.25s;
   }
   .header-left { display: flex; align-items: center; gap: 12px; }
   .logo {
@@ -57,19 +101,41 @@
     border: 1px solid rgba(34,211,165,0.3);
     border-radius: 8px;
     display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
   }
+  [data-theme="light"] .logo { border-color: rgba(5,150,105,0.3); }
   .logo svg { width: 18px; height: 18px; }
-  .header h1 { font-size: 15px; font-weight: 600; letter-spacing: -0.3px; }
+  .header-title { font-size: 15px; font-weight: 600; letter-spacing: -0.3px; }
   .header-subtitle { font-size: 12px; color: var(--text-muted); margin-top: 1px; }
-  .header-right { display: flex; align-items: center; gap: 12px; }
+  .header-right { display: flex; align-items: center; gap: 10px; }
+
+  /* ── Theme toggle ── */
+  .theme-toggle {
+    width: 36px; height: 36px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.15s;
+    flex-shrink: 0;
+  }
+  .theme-toggle:hover { border-color: var(--border-hover); background: var(--surface); }
+  .theme-toggle svg { width: 16px; height: 16px; }
+  .icon-sun { display: none; }
+  .icon-moon { display: block; }
+  [data-theme="light"] .icon-sun { display: block; }
+  [data-theme="light"] .icon-moon { display: none; }
+
   .live-badge {
     display: flex; align-items: center; gap: 6px;
-    font-size: 11px; font-family: var(--font);
+    font-size: 11px; font-family: 'JetBrains Mono', monospace;
     color: var(--green);
     background: var(--green-dim);
     border: 1px solid rgba(34,211,165,0.2);
     padding: 4px 10px; border-radius: 20px;
   }
+  [data-theme="light"] .live-badge { border-color: rgba(5,150,105,0.2); }
   .pulse {
     width: 7px; height: 7px; border-radius: 50%;
     background: var(--green);
@@ -79,7 +145,7 @@
     0%, 100% { opacity: 1; transform: scale(1); }
     50% { opacity: 0.4; transform: scale(0.7); }
   }
-  .last-poll { font-size: 11px; color: var(--text-muted); font-family: var(--font); }
+  .last-poll { font-size: 11px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
 
   /* ── Layout ── */
   .page { padding: 24px 28px; max-width: 1400px; margin: 0 auto; }
@@ -96,48 +162,35 @@
     border: 1px solid var(--border);
     border-radius: 10px;
     padding: 14px 16px;
+    transition: background 0.25s, border-color 0.25s;
   }
   .stat-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px; }
-  .stat-val { font-size: 26px; font-weight: 700; font-family: var(--font); line-height: 1; }
+  .stat-val { font-size: 26px; font-weight: 700; font-family: 'JetBrains Mono', monospace; line-height: 1; }
   .stat-sub { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
   .stat-card.green .stat-val { color: var(--green); }
-  .stat-card.amber .stat-val { color: var(--amber); }
-  .stat-card.red .stat-val { color: var(--red); }
   .stat-card.blue .stat-val { color: var(--blue); }
 
   /* ── Section titles ── */
   .section-title {
-    font-size: 12px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    color: var(--text-muted);
+    font-size: 12px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 1px; color: var(--text-muted);
     margin-bottom: 12px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
+    display: flex; align-items: center; gap: 8px;
   }
-  .section-title::after {
-    content: '';
-    flex: 1;
-    height: 1px;
-    background: var(--border);
-  }
+  .section-title::after { content: ''; flex: 1; height: 1px; background: var(--border); }
 
-  /* ── Container table ── */
+  /* ── Table ── */
   .table-wrap {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 12px;
     overflow: hidden;
     margin-bottom: 24px;
+    transition: background 0.25s, border-color 0.25s;
   }
   .table-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 14px 18px;
-    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 18px; border-bottom: 1px solid var(--border);
   }
   .table-title { font-size: 13px; font-weight: 600; }
   .sort-btns { display: flex; gap: 4px; }
@@ -145,225 +198,182 @@
     font-size: 11px; padding: 3px 8px; border-radius: 4px;
     background: transparent; border: 1px solid var(--border);
     color: var(--text-muted); cursor: pointer;
-    font-family: var(--font-ui);
     transition: all 0.15s;
   }
   .sort-btn:hover, .sort-btn.active {
-    background: var(--surface2);
-    border-color: var(--border-hover);
-    color: var(--text);
+    background: var(--surface2); border-color: var(--border-hover); color: var(--text);
   }
-  table {
-    width: 100%;
-    border-collapse: collapse;
-  }
+  table { width: 100%; border-collapse: collapse; }
   thead th {
-    padding: 10px 18px;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.7px;
-    color: var(--text-muted);
-    text-align: left;
-    border-bottom: 1px solid var(--border);
-    font-weight: 500;
+    padding: 10px 18px; font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.7px; color: var(--text-muted); text-align: left;
+    border-bottom: 1px solid var(--border); font-weight: 500;
   }
-  tbody tr {
-    border-bottom: 1px solid var(--border);
-    transition: background 0.12s;
-  }
+  tbody tr { border-bottom: 1px solid var(--border); transition: background 0.12s; }
   tbody tr:last-child { border-bottom: none; }
   tbody tr:hover { background: var(--surface2); }
-  tbody td {
-    padding: 12px 18px;
-    font-size: 13px;
-  }
+  tbody td { padding: 12px 18px; font-size: 13px; }
   .container-name {
-    font-family: var(--font);
-    font-size: 12px;
-    color: var(--text);
+    font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text);
     display: flex; align-items: center; gap: 8px;
   }
-  .status-dot {
-    width: 7px; height: 7px; border-radius: 50%;
-    background: var(--green);
-    flex-shrink: 0;
-  }
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
   .status-dot.warn { background: var(--amber); }
   .status-dot.crit { background: var(--red); animation: pulse 1s infinite; }
 
   /* ── Bar ── */
   .bar-cell { min-width: 140px; }
-  .bar-track {
-    background: rgba(255,255,255,0.06);
-    border-radius: 4px;
-    height: 6px;
-    overflow: hidden;
-    position: relative;
-  }
-  .bar-fill {
-    height: 100%;
-    border-radius: 4px;
-    transition: width 0.5s ease;
-  }
+  .bar-track { background: var(--bar-track); border-radius: 4px; height: 6px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 4px; transition: width 0.5s ease; }
   .bar-fill.ok { background: var(--green); }
   .bar-fill.warn { background: var(--amber); }
   .bar-fill.crit { background: var(--red); }
-  .bar-label { font-size: 11px; color: var(--text-muted); margin-top: 3px; font-family: var(--font); }
+  .bar-label { font-size: 11px; color: var(--text-muted); margin-top: 3px; font-family: 'JetBrains Mono', monospace; }
 
-  .badge {
-    font-size: 10px;
-    padding: 2px 7px;
-    border-radius: 20px;
-    font-family: var(--font);
-    font-weight: 500;
-  }
+  .badge { font-size: 10px; padding: 2px 7px; border-radius: 20px; font-family: 'JetBrains Mono', monospace; font-weight: 500; }
   .badge.ok { background: var(--green-dim); color: var(--green); }
   .badge.warn { background: var(--amber-dim); color: var(--amber); }
   .badge.crit { background: var(--red-dim); color: var(--red); }
 
   /* ── Two col ── */
-  .two-col {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
-    margin-bottom: 24px;
-  }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
   @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
 
-  /* ── Chart panel ── */
+  /* ── Panel ── */
   .panel {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 12px;
     overflow: hidden;
+    transition: background 0.25s, border-color 0.25s;
   }
   .panel-head {
-    padding: 12px 18px;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
+    padding: 12px 18px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
   }
   .panel-title { font-size: 13px; font-weight: 600; }
   .panel-body { padding: 16px 18px; }
-
-  /* ── Chart canvas ── */
   .chart-wrap { position: relative; width: 100%; }
 
   /* ── Recommendations ── */
   .rec-list { display: flex; flex-direction: column; gap: 10px; }
-  .rec-card {
-    border-radius: 8px;
-    padding: 12px 14px;
-    border-left: 3px solid;
-    background: var(--surface2);
-  }
+  .rec-card { border-radius: 8px; padding: 12px 14px; border-left: 3px solid; background: var(--surface2); }
   .rec-card.memory { border-color: var(--red); }
   .rec-card.cpu { border-color: var(--amber); }
   .rec-card.io { border-color: var(--blue); }
   .rec-card.general { border-color: var(--green); }
   .rec-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; }
-  .rec-container { font-family: var(--font); font-size: 11px; color: var(--text-dim); }
+  .rec-container { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-dim); }
   .rec-type { font-size: 10px; padding: 2px 6px; border-radius: 10px; font-weight: 600; }
   .rec-type.memory { background: var(--red-dim); color: var(--red); }
   .rec-type.cpu { background: var(--amber-dim); color: var(--amber); }
   .rec-type.io { background: var(--blue-dim); color: var(--blue); }
   .rec-type.general { background: var(--green-dim); color: var(--green); }
   .rec-text { font-size: 12px; color: var(--text-dim); line-height: 1.5; }
-  .rec-action { font-size: 11px; color: var(--text-muted); margin-top: 5px; font-family: var(--font); }
+  .rec-action { font-size: 11px; color: var(--text-muted); margin-top: 5px; font-family: 'JetBrains Mono', monospace; }
 
   /* ── Email log ── */
-  .email-log { display: flex; flex-direction: column; gap: 0; }
+  .tabs { display: flex; border-bottom: 1px solid var(--border); padding: 0 18px; }
+  .tab {
+    font-size: 12px; padding: 10px 14px; cursor: pointer;
+    color: var(--text-muted); border-bottom: 2px solid transparent;
+    transition: all 0.15s; margin-bottom: -1px;
+  }
+  .tab.active { color: var(--green); border-bottom-color: var(--green); }
+  .tab:hover:not(.active) { color: var(--text); }
+  .email-log { display: flex; flex-direction: column; }
   .email-entry {
-    display: grid;
-    grid-template-columns: auto 1fr auto auto;
-    align-items: center;
-    gap: 12px;
-    padding: 10px 18px;
-    border-bottom: 1px solid var(--border);
+    display: grid; grid-template-columns: auto 1fr auto auto;
+    align-items: center; gap: 12px;
+    padding: 10px 18px; border-bottom: 1px solid var(--border);
     transition: background 0.12s;
   }
   .email-entry:last-child { border-bottom: none; }
   .email-entry:hover { background: var(--surface2); }
-  .email-icon {
-    width: 28px; height: 28px; border-radius: 6px;
-    display: flex; align-items: center; justify-content: center;
-    flex-shrink: 0;
-  }
+  .email-icon { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
   .email-icon.sent { background: var(--green-dim); }
   .email-icon.failed { background: var(--red-dim); }
-  .email-icon.suppressed { background: rgba(107,114,128,0.15); }
+  .email-icon.suppressed { background: var(--surface2); }
   .email-subject { font-size: 12px; font-weight: 500; }
-  .email-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; font-family: var(--font); }
-  .email-time { font-size: 11px; color: var(--text-muted); font-family: var(--font); white-space: nowrap; }
-  .email-status {
-    font-size: 10px; padding: 2px 8px; border-radius: 20px; font-weight: 600;
-    white-space: nowrap;
-  }
+  .email-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; font-family: 'JetBrains Mono', monospace; }
+  .email-time { font-size: 11px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; white-space: nowrap; }
+  .email-status { font-size: 10px; padding: 2px 8px; border-radius: 20px; font-weight: 600; white-space: nowrap; }
   .email-status.sent { background: var(--green-dim); color: var(--green); }
   .email-status.failed { background: var(--red-dim); color: var(--red); }
-  .email-status.suppressed { background: rgba(107,114,128,0.15); color: var(--text-muted); }
+  .email-status.suppressed { background: var(--surface2); color: var(--text-muted); }
 
-  .empty-state {
-    padding: 32px;
-    text-align: center;
-    color: var(--text-muted);
-    font-size: 12px;
-  }
+  .empty-state { padding: 32px; text-align: center; color: var(--text-muted); font-size: 12px; }
 
   /* ── JSON viewer ── */
   .json-viewer {
-    background: #0d0f12;
-    border-radius: 8px;
-    padding: 14px;
-    font-family: var(--font);
+    background: var(--json-bg);
+    border-radius: 0;
+    padding: 14px 18px;
+    font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
     line-height: 1.7;
-    color: #8b949e;
+    color: var(--text-muted);
     overflow: auto;
     max-height: 240px;
+    transition: background 0.25s;
   }
-  .json-key { color: #79c0ff; }
-  .json-str { color: #a5d6ff; }
-  .json-num { color: #f0883e; }
-  .json-bool { color: #ff7b72; }
+  .json-key { color: var(--json-key); }
+  .json-str { color: var(--json-str); }
+  .json-num { color: var(--json-num); }
+  .json-bool { color: var(--json-bool); }
 
   /* ── Footer ── */
   .footer {
-    margin-top: 32px;
-    padding: 16px 0;
+    margin-top: 32px; padding: 16px 0;
     border-top: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    font-size: 11px;
-    color: var(--text-muted);
-    font-family: var(--font);
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 11px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace;
   }
 
-  /* ── Tab bar ── */
-  .tabs {
-    display: flex;
-    gap: 0;
-    border-bottom: 1px solid var(--border);
-    padding: 0 18px;
-  }
-  .tab {
+  /* ── PWA install banner ── */
+  .install-banner {
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    background: var(--green-dim);
+    border-bottom: 1px solid rgba(34,211,165,0.2);
+    padding: 10px 28px;
     font-size: 12px;
-    padding: 10px 14px;
-    cursor: pointer;
-    color: var(--text-muted);
-    border-bottom: 2px solid transparent;
-    transition: all 0.15s;
-    margin-bottom: -1px;
+    color: var(--text);
   }
-  .tab.active { color: var(--green); border-bottom-color: var(--green); }
-  .tab:hover:not(.active) { color: var(--text); }
-  .tab-content { display: none; }
-  .tab-content.active { display: block; }
+  [data-theme="light"] .install-banner { border-color: rgba(5,150,105,0.2); }
+  .install-banner.visible { display: flex; }
+  .install-btn {
+    font-size: 11px; padding: 4px 12px; border-radius: 6px;
+    background: var(--green); color: #fff; border: none; cursor: pointer;
+    font-weight: 600; white-space: nowrap;
+    transition: opacity 0.15s;
+  }
+  [data-theme="light"] .install-btn { color: #fff; }
+  .install-btn:hover { opacity: 0.85; }
+  .install-dismiss {
+    background: none; border: none; color: var(--text-muted);
+    cursor: pointer; font-size: 16px; padding: 0 4px; line-height: 1;
+  }
+
+  @media (max-width: 600px) {
+    .header { padding: 12px 16px; }
+    .page { padding: 16px; }
+    .last-poll { display: none; }
+  }
 </style>
 </head>
 <body>
+
+<!-- PWA install prompt -->
+<div class="install-banner" id="install-banner">
+  <span>Install Docker Monitor as an app for quick access from your home screen.</span>
+  <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
+    <button class="install-btn" id="install-btn">Install</button>
+    <button class="install-dismiss" id="install-dismiss" aria-label="Dismiss">&#x2715;</button>
+  </div>
+</div>
 
 <div class="header">
   <div class="header-left">
@@ -374,26 +384,39 @@
       </svg>
     </div>
     <div>
-      <div class="header h1" style="font-size:15px;font-weight:600;letter-spacing:-0.3px;">Docker Resource Monitor</div>
-      <div class="header-subtitle">Real-time container health & alerts</div>
+      <div class="header-title">Docker Resource Monitor</div>
+      <div class="header-subtitle">Real-time container health &amp; alerts</div>
     </div>
   </div>
   <div class="header-right">
     <span class="last-poll">Last poll: <span id="last-poll-time">—</span></span>
+    <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme" title="Toggle light/dark theme">
+      <!-- Moon (shown in dark mode) -->
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+      <!-- Sun (shown in light mode) -->
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="5"/>
+        <line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>
+        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+        <line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>
+        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+      </svg>
+    </button>
     <div class="live-badge"><div class="pulse"></div> LIVE</div>
   </div>
 </div>
 
 <div class="page">
 
-  <!-- Stat cards -->
   <div class="stat-grid">
     <div class="stat-card green">
       <div class="stat-label">Containers Running</div>
       <div class="stat-val" id="stat-running">—</div>
       <div class="stat-sub">total active</div>
     </div>
-    <div class="stat-card" id="stat-alerts-card" style="--accent:var(--green)">
+    <div class="stat-card">
       <div class="stat-label">Active Alerts</div>
       <div class="stat-val" id="stat-alerts" style="color:var(--green)">0</div>
       <div class="stat-sub">above threshold</div>
@@ -415,27 +438,21 @@
     </div>
   </div>
 
-  <!-- Container table -->
   <div class="section-title">Container Overview</div>
-  <div class="table-wrap" style="margin-bottom:24px">
+  <div class="table-wrap">
     <div class="table-header">
       <div class="table-title">Running Containers</div>
       <div class="sort-btns">
-        <button class="sort-btn active" onclick="sortTable('mem')">Memory</button>
-        <button class="sort-btn" onclick="sortTable('name')">Name</button>
-        <button class="sort-btn" onclick="sortTable('pct')">Usage %</button>
+        <button class="sort-btn active" onclick="sortTable('mem',this)">Memory</button>
+        <button class="sort-btn" onclick="sortTable('name',this)">Name</button>
+        <button class="sort-btn" onclick="sortTable('pct',this)">Usage %</button>
       </div>
     </div>
     <table>
       <thead>
         <tr>
-          <th>Container</th>
-          <th>Memory Used</th>
-          <th>RSS</th>
-          <th>Limit</th>
-          <th class="bar-cell">Usage</th>
-          <th>Status</th>
-          <th>Updated</th>
+          <th>Container</th><th>Memory Used</th><th>RSS</th>
+          <th>Limit</th><th class="bar-cell">Usage</th><th>Status</th><th>Updated</th>
         </tr>
       </thead>
       <tbody id="container-tbody">
@@ -444,14 +461,11 @@
     </table>
   </div>
 
-  <!-- Charts + Recommendations -->
   <div class="two-col">
-
-    <!-- Memory chart -->
     <div class="panel">
       <div class="panel-head">
         <div class="panel-title">Memory Distribution</div>
-        <span style="font-size:11px;color:var(--text-muted);font-family:var(--font)">MB</span>
+        <span style="font-size:11px;color:var(--text-muted);font-family:'JetBrains Mono',monospace">MB</span>
       </div>
       <div class="panel-body">
         <div class="chart-wrap" style="height:220px">
@@ -459,12 +473,10 @@
         </div>
       </div>
     </div>
-
-    <!-- Usage % chart -->
     <div class="panel">
       <div class="panel-head">
         <div class="panel-title">Memory Usage %</div>
-        <span style="font-size:11px;color:var(--text-muted);font-family:var(--font)">% of limit</span>
+        <span style="font-size:11px;color:var(--text-muted);font-family:'JetBrains Mono',monospace">% of limit</span>
       </div>
       <div class="panel-body">
         <div class="chart-wrap" style="height:220px">
@@ -474,11 +486,10 @@
     </div>
   </div>
 
-  <!-- History line chart -->
   <div class="panel" style="margin-bottom:24px">
     <div class="panel-head">
       <div class="panel-title">Memory Trend (last 20 polls)</div>
-      <span style="font-size:11px;color:var(--text-muted);font-family:var(--font)">MB over time</span>
+      <span style="font-size:11px;color:var(--text-muted);font-family:'JetBrains Mono',monospace">MB over time</span>
     </div>
     <div class="panel-body">
       <div class="chart-wrap" style="height:200px">
@@ -487,62 +498,114 @@
     </div>
   </div>
 
-  <!-- Recs + Email log -->
   <div class="two-col">
-
-    <!-- Recommendations -->
     <div class="panel">
-      <div class="panel-head">
-        <div class="panel-title">Optimization Recommendations</div>
-      </div>
+      <div class="panel-head"><div class="panel-title">Optimization Recommendations</div></div>
       <div class="panel-body" style="padding-top:8px">
         <div class="rec-list" id="rec-list">
           <div class="empty-state">No recommendations yet — awaiting data…</div>
         </div>
       </div>
     </div>
-
-    <!-- Email notification log -->
     <div class="panel">
       <div class="tabs" id="email-tabs">
-        <div class="tab active" onclick="switchTab('all')">All Notifications</div>
-        <div class="tab" onclick="switchTab('sent')">Sent</div>
-        <div class="tab" onclick="switchTab('failed')">Failed</div>
-        <div class="tab" onclick="switchTab('suppressed')">Suppressed</div>
+        <div class="tab active" onclick="switchTab('all',this)">All</div>
+        <div class="tab" onclick="switchTab('sent',this)">Sent</div>
+        <div class="tab" onclick="switchTab('failed',this)">Failed</div>
+        <div class="tab" onclick="switchTab('suppressed',this)">Suppressed</div>
       </div>
       <div class="email-log" id="email-log">
         <div class="empty-state">No alerts fired yet — monitoring in progress…</div>
       </div>
     </div>
-
   </div>
 
-  <!-- Raw JSON snapshot -->
   <div class="section-title" style="margin-top:8px">Raw Snapshot</div>
   <div class="panel" style="margin-bottom:24px">
     <div class="panel-head">
       <div class="panel-title">latest.json</div>
-      <span style="font-size:11px;color:var(--text-muted);font-family:var(--font)" id="snapshot-age">—</span>
+      <span style="font-size:11px;color:var(--text-muted);font-family:'JetBrains Mono',monospace" id="snapshot-age">—</span>
     </div>
-    <div class="panel-body" style="padding:0">
-      <pre class="json-viewer" id="json-viewer">Loading…</pre>
-    </div>
+    <pre class="json-viewer" id="json-viewer">Loading…</pre>
   </div>
 
   <div class="footer">
-    <span>Docker Memory Monitor · UI v1.0</span>
+    <span>Docker Memory Monitor · UI v1.1</span>
     <span id="footer-time">—</span>
   </div>
-
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script>
+// ── Theme ─────────────────────────────────────────────────────────────────
+const html = document.documentElement;
+const themeBtn = document.getElementById('theme-toggle');
+const themeColorMeta = document.getElementById('theme-color-meta');
+
+function getTheme() { return localStorage.getItem('dmTheme') || 'dark'; }
+function applyTheme(t) {
+  html.setAttribute('data-theme', t);
+  localStorage.setItem('dmTheme', t);
+  themeColorMeta.content = t === 'dark' ? '#0b0d10' : '#ffffff';
+  updateChartTheme();
+}
+themeBtn.addEventListener('click', () => {
+  applyTheme(getTheme() === 'dark' ? 'light' : 'dark');
+});
+applyTheme(getTheme());
+
+function chartColors() {
+  const dark = getTheme() === 'dark';
+  return {
+    grid: dark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.05)',
+    tick: dark ? '#6b7280' : '#9ca3af',
+  };
+}
+
+function updateChartTheme() {
+  if (!memChart) return;
+  const { grid, tick } = chartColors();
+  [memChart, pctChart, trendChart].forEach(ch => {
+    Object.values(ch.options.scales).forEach(scale => {
+      if (scale.grid) scale.grid.color = grid;
+      if (scale.ticks) scale.ticks.color = tick;
+    });
+    ch.update();
+  });
+}
+
+// ── PWA ───────────────────────────────────────────────────────────────────
+let deferredInstallPrompt = null;
+const banner = document.getElementById('install-banner');
+const installBtn = document.getElementById('install-btn');
+const dismissBtn = document.getElementById('install-dismiss');
+
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  if (!localStorage.getItem('dmPwaDismissed')) banner.classList.add('visible');
+});
+installBtn.addEventListener('click', async () => {
+  if (!deferredInstallPrompt) return;
+  deferredInstallPrompt.prompt();
+  const { outcome } = await deferredInstallPrompt.userChoice;
+  if (outcome === 'accepted') banner.classList.remove('visible');
+  deferredInstallPrompt = null;
+});
+dismissBtn.addEventListener('click', () => {
+  banner.classList.remove('visible');
+  localStorage.setItem('dmPwaDismissed', '1');
+});
+window.addEventListener('appinstalled', () => banner.classList.remove('visible'));
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+
 // ── State ─────────────────────────────────────────────────────────────────
 let currentSort = 'mem';
 let emailFilter = 'all';
 let memChart, pctChart, trendChart;
-let trendHistory = {};
 let emailLog = [];
 let emailSentCount = 0;
 const POLL_INTERVAL = 30000;
@@ -552,174 +615,118 @@ const COOLDOWN = 300;
 let prevStats = {};
 let lastAlertTime = {};
 
-// ── Demo data generator ───────────────────────────────────────────────────
+// ── Demo data ─────────────────────────────────────────────────────────────
 const DEMO_CONTAINERS = [
-  { name: 'nginx-proxy',        baseUsage: 45,  limit: 256,  rssRatio: 0.85 },
-  { name: 'billflow-api',       baseUsage: 310, limit: 512,  rssRatio: 0.78 },
-  { name: 'billflow-frontend',  baseUsage: 95,  limit: 256,  rssRatio: 0.82 },
-  { name: 'postgres-db',        baseUsage: 420, limit: 512,  rssRatio: 0.72 },
-  { name: 'redis-cache',        baseUsage: 28,  limit: 128,  rssRatio: 0.95 },
-  { name: 'docker-memory-monitor', baseUsage: 38, limit: 128, rssRatio: 0.88 },
-  { name: 'acme-companion',     baseUsage: 18,  limit: 64,   rssRatio: 0.90 },
+  { name: 'nginx-proxy',           baseUsage: 45,  limit: 256, rssRatio: 0.85 },
+  { name: 'billflow-api',          baseUsage: 310, limit: 512, rssRatio: 0.78 },
+  { name: 'billflow-frontend',     baseUsage: 95,  limit: 256, rssRatio: 0.82 },
+  { name: 'postgres-db',           baseUsage: 420, limit: 512, rssRatio: 0.72 },
+  { name: 'redis-cache',           baseUsage: 28,  limit: 128, rssRatio: 0.95 },
+  { name: 'docker-memory-monitor', baseUsage: 38,  limit: 128, rssRatio: 0.88 },
+  { name: 'acme-companion',        baseUsage: 18,  limit: 64,  rssRatio: 0.90 },
 ];
-
-function jitter(val, pct = 8) {
-  return val * (1 + (Math.random() - 0.5) * pct / 100);
-}
-
+function jitter(v, p=8) { return v * (1 + (Math.random()-0.5)*p/100); }
 function generateSnapshot() {
-  const containers = DEMO_CONTAINERS.map(c => {
-    const usage = Math.round(jitter(c.baseUsage));
-    const rss   = Math.round(usage * c.rssRatio);
-    const limit = c.limit;
-    const pct   = parseFloat(((usage / limit) * 100).toFixed(2));
-    return {
-      container_id:   Math.random().toString(36).slice(2,9),
-      container_name: c.name,
-      usage_mb:       usage,
-      rss_mb:         rss,
-      limit_mb:       limit,
-      usage_pct:      pct,
-      timestamp:      new Date().toISOString(),
-    };
-  });
   return {
     polled_at: new Date().toISOString(),
-    containers
+    containers: DEMO_CONTAINERS.map(c => {
+      const usage = Math.round(jitter(c.baseUsage));
+      const rss   = Math.round(usage * c.rssRatio);
+      const pct   = parseFloat(((usage / c.limit) * 100).toFixed(2));
+      return { container_id: Math.random().toString(36).slice(2,9), container_name: c.name,
+               usage_mb: usage, rss_mb: rss, limit_mb: c.limit, usage_pct: pct,
+               timestamp: new Date().toISOString() };
+    })
   };
 }
 
-// ── Alert logic ───────────────────────────────────────────────────────────
+// ── Alerts ────────────────────────────────────────────────────────────────
 function checkAlerts(containers) {
   const now = Date.now() / 1000;
   containers.forEach(s => {
-    const name = s.container_name;
-    const pct = s.usage_pct;
+    const name = s.container_name, pct = s.usage_pct;
     const reasons = [];
-
-    if (pct >= ALERT_THRESHOLD)
-      reasons.push(`usage ${pct.toFixed(1)}% ≥ threshold ${ALERT_THRESHOLD}%`);
-
+    if (pct >= ALERT_THRESHOLD) reasons.push(`usage ${pct.toFixed(1)}% ≥ threshold ${ALERT_THRESHOLD}%`);
     const prev = prevStats[name];
     if (prev !== undefined && (pct - prev) >= SPIKE_DELTA)
-      reasons.push(`spike: ${prev.toFixed(1)}% → ${pct.toFixed(1)}% (+${(pct - prev).toFixed(1)}%)`);
-
+      reasons.push(`spike: ${prev.toFixed(1)}% → ${pct.toFixed(1)}% (+${(pct-prev).toFixed(1)}%)`);
     prevStats[name] = pct;
-
     if (!reasons.length) return;
-
     const cooldownLeft = (lastAlertTime[name] || 0) + COOLDOWN - now;
     if (cooldownLeft > 0) {
-      addEmailEntry({
-        status: 'suppressed',
-        subject: `Docker Alert: ${name} (${pct.toFixed(1)}%)`,
-        meta: `Cooldown — ${Math.ceil(cooldownLeft)}s remaining`,
-        time: new Date().toISOString(),
-      });
+      addEmailEntry({ status:'suppressed', subject:`Docker Alert: ${name} (${pct.toFixed(1)}%)`,
+                      meta:`Cooldown — ${Math.ceil(cooldownLeft)}s remaining`, time: new Date().toISOString() });
       return;
     }
-
     lastAlertTime[name] = now;
-    const success = Math.random() > 0.08;
-    emailSentCount += success ? 1 : 0;
-    document.getElementById('stat-emails').textContent = emailSentCount;
-    addEmailEntry({
-      status: success ? 'sent' : 'failed',
-      subject: `Docker Memory Alert: ${name} (${pct.toFixed(1)}%)`,
-      meta: reasons.join(' & '),
-      time: new Date().toISOString(),
-    });
+    const ok = Math.random() > 0.08;
+    if (ok) { emailSentCount++; document.getElementById('stat-emails').textContent = emailSentCount; }
+    addEmailEntry({ status: ok ? 'sent' : 'failed',
+                    subject: `Docker Memory Alert: ${name} (${pct.toFixed(1)}%)`,
+                    meta: reasons.join(' & '), time: new Date().toISOString() });
   });
 }
 
 // ── Email log ─────────────────────────────────────────────────────────────
-function addEmailEntry(entry) {
-  emailLog.unshift(entry);
-  if (emailLog.length > 50) emailLog.pop();
-  renderEmailLog();
-}
+function addEmailEntry(e) { emailLog.unshift(e); if (emailLog.length > 50) emailLog.pop(); renderEmailLog(); }
 
-function switchTab(filter) {
+function switchTab(filter, el) {
   emailFilter = filter;
-  document.querySelectorAll('.tab').forEach((t, i) => {
-    t.classList.toggle('active', ['all','sent','failed','suppressed'][i] === filter);
-  });
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
   renderEmailLog();
 }
 
 function renderEmailLog() {
-  const filtered = emailFilter === 'all' ? emailLog : emailLog.filter(e => e.status === emailFilter);
+  const items = emailFilter === 'all' ? emailLog : emailLog.filter(e => e.status === emailFilter);
   const el = document.getElementById('email-log');
-
-  if (!filtered.length) {
-    el.innerHTML = `<div class="empty-state">No ${emailFilter === 'all' ? '' : emailFilter + ' '}notifications yet</div>`;
-    return;
-  }
-
+  if (!items.length) { el.innerHTML = `<div class="empty-state">No ${emailFilter==='all'?'':emailFilter+' '}notifications yet</div>`; return; }
   const icons = {
-    sent: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22d3a5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 2 15 22 11 13 2 9 22 2"/></svg>`,
-    failed: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>`,
-    suppressed: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>`,
+    sent: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 2 15 22 11 13 2 9 22 2"/></svg>`,
+    failed: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>`,
+    suppressed: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>`,
   };
-
-  el.innerHTML = filtered.slice(0, 20).map(e => `
+  el.innerHTML = items.slice(0,20).map(e => `
     <div class="email-entry">
       <div class="email-icon ${e.status}">${icons[e.status]}</div>
-      <div>
-        <div class="email-subject">${e.subject}</div>
-        <div class="email-meta">${e.meta}</div>
-      </div>
-      <div class="email-time">${formatTime(e.time)}</div>
+      <div><div class="email-subject">${e.subject}</div><div class="email-meta">${e.meta}</div></div>
+      <div class="email-time">${new Date(e.time).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</div>
       <div class="email-status ${e.status}">${e.status}</div>
     </div>`).join('');
 }
 
-function formatTime(iso) {
-  const d = new Date(iso);
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-}
-
 // ── Table ─────────────────────────────────────────────────────────────────
-function sortTable(key) {
+function sortTable(key, btn) {
   currentSort = key;
   document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
-  event.target.classList.add('active');
+  btn.classList.add('active');
+  if (window._lastContainers) renderTable(window._lastContainers);
 }
-
-function statusClass(pct) {
-  if (pct >= ALERT_THRESHOLD) return 'crit';
-  if (pct >= ALERT_THRESHOLD * 0.75) return 'warn';
-  return 'ok';
-}
+function statusClass(p) { return p >= ALERT_THRESHOLD ? 'crit' : p >= ALERT_THRESHOLD*0.75 ? 'warn' : 'ok'; }
 
 function renderTable(containers) {
-  const sorted = [...containers].sort((a, b) => {
-    if (currentSort === 'name') return a.container_name.localeCompare(b.container_name);
-    if (currentSort === 'pct') return b.usage_pct - a.usage_pct;
-    return b.usage_mb - a.usage_mb;
-  });
-
+  window._lastContainers = containers;
+  const sorted = [...containers].sort((a,b) =>
+    currentSort==='name' ? a.container_name.localeCompare(b.container_name) :
+    currentSort==='pct'  ? b.usage_pct - a.usage_pct : b.usage_mb - a.usage_mb);
   const alertCount = sorted.filter(c => c.usage_pct >= ALERT_THRESHOLD).length;
-  document.getElementById('stat-alerts').textContent = alertCount;
   const ac = document.getElementById('stat-alerts');
+  ac.textContent = alertCount;
   ac.style.color = alertCount > 0 ? 'var(--red)' : 'var(--green)';
-
   document.getElementById('container-tbody').innerHTML = sorted.map(c => {
     const cls = statusClass(c.usage_pct);
-    const limitStr = c.limit_mb ? `${c.limit_mb} MB` : 'unlimited';
-    const barPct = Math.min(c.usage_pct, 100).toFixed(1);
-    const ts = new Date(c.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const ts = new Date(c.timestamp).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'});
     return `<tr>
       <td><div class="container-name"><span class="status-dot ${cls}"></span>${c.container_name}</div></td>
-      <td style="font-family:var(--font);font-size:12px">${c.usage_mb} MB</td>
-      <td style="font-family:var(--font);font-size:12px;color:var(--text-muted)">${c.rss_mb} MB</td>
-      <td style="font-family:var(--font);font-size:12px;color:var(--text-muted)">${limitStr}</td>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:12px">${c.usage_mb} MB</td>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text-muted)">${c.rss_mb} MB</td>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text-muted)">${c.limit_mb ? c.limit_mb+' MB' : 'unlimited'}</td>
       <td class="bar-cell">
-        <div class="bar-track"><div class="bar-fill ${cls}" style="width:${barPct}%"></div></div>
+        <div class="bar-track"><div class="bar-fill ${cls}" style="width:${Math.min(c.usage_pct,100).toFixed(1)}%"></div></div>
         <div class="bar-label">${c.usage_pct.toFixed(1)}%</div>
       </td>
-      <td><span class="badge ${cls}">${cls === 'crit' ? 'CRITICAL' : cls === 'warn' ? 'WARNING' : 'OK'}</span></td>
-      <td style="font-family:var(--font);font-size:11px;color:var(--text-muted)">${ts}</td>
+      <td><span class="badge ${cls}">${cls==='crit'?'CRITICAL':cls==='warn'?'WARNING':'OK'}</span></td>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-muted)">${ts}</td>
     </tr>`;
   }).join('');
 }
@@ -728,88 +735,58 @@ function renderTable(containers) {
 const CHART_COLORS = ['#22d3a5','#60a5fa','#f59e0b','#f87171','#a78bfa','#34d399','#fb923c'];
 
 function initCharts() {
-  const defaults = {
-    responsive: true,
-    maintainAspectRatio: false,
+  const { grid, tick } = chartColors();
+  const base = {
+    responsive: true, maintainAspectRatio: false,
     animation: { duration: 400 },
     plugins: { legend: { display: false } },
   };
-
   memChart = new Chart(document.getElementById('memChart'), {
     type: 'bar',
-    data: { labels: [], datasets: [{ data: [], backgroundColor: CHART_COLORS, borderRadius: 4, borderSkipped: false }] },
-    options: {
-      ...defaults,
-      scales: {
-        x: { ticks: { color: '#6b7280', font: { size: 10 }, maxRotation: 30 }, grid: { color: 'rgba(255,255,255,0.04)' } },
-        y: { ticks: { color: '#6b7280', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } }
-      },
-    }
+    data: { labels:[], datasets:[{ data:[], backgroundColor: CHART_COLORS, borderRadius:4, borderSkipped:false }] },
+    options: { ...base, scales: {
+      x: { ticks:{color:tick,font:{size:10},maxRotation:30}, grid:{color:grid} },
+      y: { ticks:{color:tick,font:{size:10}}, grid:{color:grid} }
+    }}
   });
-
   pctChart = new Chart(document.getElementById('pctChart'), {
     type: 'bar',
-    data: { labels: [], datasets: [{ data: [], backgroundColor: [], borderRadius: 4, borderSkipped: false }] },
-    options: {
-      ...defaults,
-      indexAxis: 'y',
-      scales: {
-        x: { min: 0, max: 100, ticks: { color: '#6b7280', font: { size: 10 }, callback: v => v + '%' }, grid: { color: 'rgba(255,255,255,0.04)' } },
-        y: { ticks: { color: '#6b7280', font: { size: 10, family: 'JetBrains Mono,monospace' } }, grid: { display: false } }
-      },
-    }
+    data: { labels:[], datasets:[{ data:[], backgroundColor:[], borderRadius:4, borderSkipped:false }] },
+    options: { ...base, indexAxis:'y', scales: {
+      x: { min:0, max:100, ticks:{color:tick,font:{size:10},callback:v=>v+'%'}, grid:{color:grid} },
+      y: { ticks:{color:tick,font:{size:10,family:"'JetBrains Mono',monospace"}}, grid:{display:false} }
+    }}
   });
-
   trendChart = new Chart(document.getElementById('trendChart'), {
     type: 'line',
-    data: { labels: [], datasets: [] },
-    options: {
-      ...defaults,
-      interaction: { mode: 'index', intersect: false },
-      scales: {
-        x: { ticks: { color: '#6b7280', font: { size: 10 }, maxTicksLimit: 8 }, grid: { color: 'rgba(255,255,255,0.04)' } },
-        y: { ticks: { color: '#6b7280', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } }
-      },
-    }
+    data: { labels:[], datasets:[] },
+    options: { ...base, interaction:{mode:'index',intersect:false}, scales: {
+      x: { ticks:{color:tick,font:{size:10},maxTicksLimit:8}, grid:{color:grid} },
+      y: { ticks:{color:tick,font:{size:10}}, grid:{color:grid} }
+    }}
   });
 }
 
 function updateCharts(containers) {
   const names = containers.map(c => c.container_name.replace('docker-memory-monitor','dm-monitor'));
-  const usages = containers.map(c => c.usage_mb);
-  const pcts = containers.map(c => parseFloat(c.usage_pct.toFixed(1)));
-  const pctColors = pcts.map(p => p >= ALERT_THRESHOLD ? '#f87171' : p >= ALERT_THRESHOLD * 0.75 ? '#f59e0b' : '#22d3a5');
-
   memChart.data.labels = names;
-  memChart.data.datasets[0].data = usages;
+  memChart.data.datasets[0].data = containers.map(c => c.usage_mb);
   memChart.update();
-
   pctChart.data.labels = names;
-  pctChart.data.datasets[0].data = pcts;
-  pctChart.data.datasets[0].backgroundColor = pctColors;
+  pctChart.data.datasets[0].data = containers.map(c => parseFloat(c.usage_pct.toFixed(1)));
+  pctChart.data.datasets[0].backgroundColor = containers.map(c =>
+    c.usage_pct >= ALERT_THRESHOLD ? '#f87171' : c.usage_pct >= ALERT_THRESHOLD*0.75 ? '#f59e0b' : '#22d3a5');
   pctChart.update();
-
-  // Trend
-  const ts = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  if (!trendChart.data.labels) trendChart.data.labels = [];
+  const ts = new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'});
   trendChart.data.labels.push(ts);
   if (trendChart.data.labels.length > 20) trendChart.data.labels.shift();
-
-  containers.slice(0, 5).forEach((c, i) => {
-    if (!trendChart.data.datasets[i]) {
-      trendChart.data.datasets[i] = {
-        label: c.container_name,
-        data: [],
-        borderColor: CHART_COLORS[i],
-        backgroundColor: 'transparent',
-        borderWidth: 1.5,
-        pointRadius: 2,
-        tension: 0.4,
-      };
-    }
+  containers.slice(0,5).forEach((c,i) => {
+    if (!trendChart.data.datasets[i]) trendChart.data.datasets[i] = {
+      label: c.container_name, data:[], borderColor: CHART_COLORS[i],
+      backgroundColor:'transparent', borderWidth:1.5, pointRadius:2, tension:0.4,
+    };
     trendChart.data.datasets[i].data.push(c.usage_mb);
-    if (trendChart.data.datasets[i].data.length > 20)
-      trendChart.data.datasets[i].data.shift();
+    if (trendChart.data.datasets[i].data.length > 20) trendChart.data.datasets[i].data.shift();
   });
   trendChart.update();
 }
@@ -817,44 +794,22 @@ function updateCharts(containers) {
 // ── Recommendations ───────────────────────────────────────────────────────
 function generateRecommendations(containers) {
   const recs = [];
-
   containers.forEach(c => {
-    const pct = c.usage_pct;
-    const name = c.container_name;
-
-    if (pct >= 90) {
-      recs.push({ type: 'memory', container: name, text: `Memory critically high. Increase limit via mem_limit in docker-compose.yml or investigate memory leaks with docker stats --no-stream.`, action: `mem_limit: ${Math.round(c.limit_mb * 1.5)}m` });
-    } else if (pct >= 80) {
-      recs.push({ type: 'memory', container: name, text: `Approaching memory limit. Consider raising the limit or profiling the application for leaks. Check for unclosed DB connections.`, action: `mem_limit: ${Math.round(c.limit_mb * 1.25)}m` });
-    } else if (pct >= 60 && name.includes('redis')) {
-      recs.push({ type: 'memory', container: name, text: `Redis memory growing. Review TTL policies, add maxmemory-policy allkeys-lru in redis.conf, and check for key accumulation.`, action: `maxmemory ${Math.round(c.limit_mb * 0.8)}mb` });
-    }
-
-    if (name.includes('postgres') || name.includes('db')) {
-      if (c.usage_mb > 300) {
-        recs.push({ type: 'io', container: name, text: `PostgreSQL using significant memory. Run VACUUM ANALYZE, check for long-running queries with pg_stat_activity, and tune shared_buffers.`, action: `shared_buffers = ${Math.round(c.limit_mb * 0.25)}MB` });
-      }
-    }
-
-    if (name.includes('nginx')) {
-      recs.push({ type: 'general', container: name, text: `Nginx baseline looks healthy. Ensure worker_processes auto and worker_connections 1024 are set. Consider enabling gzip compression to reduce downstream load.`, action: `worker_processes auto;` });
-    }
+    const { usage_pct: pct, container_name: name, usage_mb, limit_mb } = c;
+    if (pct >= 90) recs.push({ type:'memory', container:name, text:`Memory critically high. Increase limit via mem_limit in docker-compose.yml or investigate leaks with docker stats --no-stream.`, action:`mem_limit: ${Math.round(limit_mb*1.5)}m` });
+    else if (pct >= 80) recs.push({ type:'memory', container:name, text:`Approaching memory limit. Consider raising the limit or profiling for leaks. Check for unclosed DB connections.`, action:`mem_limit: ${Math.round(limit_mb*1.25)}m` });
+    else if (pct >= 60 && name.includes('redis')) recs.push({ type:'memory', container:name, text:`Redis memory growing. Review TTL policies, set maxmemory-policy allkeys-lru in redis.conf, and audit key accumulation.`, action:`maxmemory ${Math.round(limit_mb*0.8)}mb` });
+    if ((name.includes('postgres')||name.includes('db')) && usage_mb > 300)
+      recs.push({ type:'io', container:name, text:`PostgreSQL using significant memory. Run VACUUM ANALYZE, audit long-running queries via pg_stat_activity, and tune shared_buffers.`, action:`shared_buffers = ${Math.round(limit_mb*0.25)}MB` });
+    if (name.includes('nginx'))
+      recs.push({ type:'general', container:name, text:`Nginx baseline looks healthy. Verify worker_processes auto and worker_connections 1024. Enable gzip compression to reduce downstream load.`, action:`worker_processes auto;` });
   });
-
-  if (containers.filter(c => !c.limit_mb).length > 0) {
-    recs.push({ type: 'general', container: 'all containers', text: `Some containers have no memory limit set. This means usage_pct reflects % of total host RAM. Set explicit mem_limit for all services to enable accurate alerting.`, action: `mem_limit: 256m` });
-  }
-
-  if (!recs.length) {
-    recs.push({ type: 'general', container: 'all', text: 'All containers are within healthy memory bounds. No action required.', action: '' });
-  }
-
-  document.getElementById('rec-list').innerHTML = recs.slice(0, 6).map(r => `
+  if (containers.some(c => !c.limit_mb))
+    recs.push({ type:'general', container:'all containers', text:`Some containers have no memory limit. usage_pct reflects % of total host RAM — set explicit mem_limit for accurate alerting.`, action:`mem_limit: 256m` });
+  if (!recs.length) recs.push({ type:'general', container:'all', text:'All containers are within healthy memory bounds. No action required.', action:'' });
+  document.getElementById('rec-list').innerHTML = recs.slice(0,6).map(r => `
     <div class="rec-card ${r.type}">
-      <div class="rec-header">
-        <span class="rec-container">${r.container}</span>
-        <span class="rec-type ${r.type}">${r.type.toUpperCase()}</span>
-      </div>
+      <div class="rec-header"><span class="rec-container">${r.container}</span><span class="rec-type ${r.type}">${r.type.toUpperCase()}</span></div>
       <div class="rec-text">${r.text}</div>
       ${r.action ? `<div class="rec-action">→ ${r.action}</div>` : ''}
     </div>`).join('');
@@ -862,40 +817,33 @@ function generateRecommendations(containers) {
 
 // ── JSON viewer ───────────────────────────────────────────────────────────
 function renderJson(snapshot) {
-  const str = JSON.stringify(snapshot, null, 2);
-  const html = str
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"([^"]+)":/g, '<span class="json-key">"$1"</span>:')
-    .replace(/: "([^"]*)"/g, ': <span class="json-str">"$1"</span>')
-    .replace(/: (\d+\.?\d*)/g, ': <span class="json-num">$1</span>')
-    .replace(/: (true|false)/g, ': <span class="json-bool">$1</span>');
+  const html = JSON.stringify(snapshot,null,2)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"([^"]+)":/g,'<span class="json-key">"$1"</span>:')
+    .replace(/: "([^"]*)"/g,': <span class="json-str">"$1"</span>')
+    .replace(/: (\d+\.?\d*)/g,': <span class="json-num">$1</span>')
+    .replace(/: (true|false)/g,': <span class="json-bool">$1</span>');
   document.getElementById('json-viewer').innerHTML = html;
-  const age = Math.round((Date.now() - new Date(snapshot.polled_at)) / 1000);
-  document.getElementById('snapshot-age').textContent = `${age}s ago`;
+  document.getElementById('snapshot-age').textContent = `${Math.round((Date.now()-new Date(snapshot.polled_at))/1000)}s ago`;
 }
 
-// ── Main poll loop ─────────────────────────────────────────────────────────
+// ── Poll ──────────────────────────────────────────────────────────────────
 async function fetchSnapshot() {
   try {
-    const res = await fetch('/data/latest.json?_=' + Date.now());
-    if (!res.ok) throw new Error('not found');
-    return await res.json();
-  } catch {
-    return generateSnapshot();
-  }
+    const r = await fetch('/data/latest.json?_='+Date.now());
+    if (!r.ok) throw 0;
+    return await r.json();
+  } catch { return generateSnapshot(); }
 }
 
 async function poll() {
   const snapshot = await fetchSnapshot();
   const containers = snapshot.containers || [];
-
   document.getElementById('stat-running').textContent = containers.length;
-  const totalMem = containers.reduce((s, c) => s + c.usage_mb, 0);
-  document.getElementById('stat-mem').textContent = Math.round(totalMem);
+  document.getElementById('stat-mem').textContent = Math.round(containers.reduce((s,c)=>s+c.usage_mb,0));
   const now = new Date();
   document.getElementById('last-poll-time').textContent = now.toLocaleTimeString();
   document.getElementById('footer-time').textContent = now.toLocaleString();
-
   renderTable(containers);
   updateCharts(containers);
   generateRecommendations(containers);
@@ -903,12 +851,7 @@ async function poll() {
   renderJson(snapshot);
 }
 
-// ── Init ──────────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
-  initCharts();
-  poll();
-  setInterval(poll, POLL_INTERVAL);
-});
+document.addEventListener('DOMContentLoaded', () => { initCharts(); poll(); setInterval(poll, POLL_INTERVAL); });
 </script>
 </body>
 </html>
