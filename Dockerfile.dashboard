@@ -1,21 +1,11 @@
 FROM python:3.12-slim
 
-LABEL description="Docker Monitor Dashboard UI (PWA)"
+LABEL description="Docker Monitor Dashboard UI"
 
 WORKDIR /app
 
-# Copy all dashboard assets
 COPY dashboard.html .
 COPY dashboard_server.py .
-COPY manifest.json .
-COPY sw.js .
-
-# Icons folder — create it so the server starts even if you haven't
-# generated the PNGs yet; replace with real 192x192 and 512x512 icons.
-RUN mkdir -p /app/icons
-
-# Optionally copy pre-generated icons if they exist
-# COPY icons/ ./icons/
 
 RUN mkdir -p /var/log/docker-monitor
 

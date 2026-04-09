@@ -1,6 +1,6 @@
 FROM python:3.12-slim
 
-LABEL maintainer="you@example.com"
+LABEL maintainer="lwandahorace@gmail.com"
 LABEL description="Docker container memory monitor with email alerts"
 
 WORKDIR /app

@@ -62,13 +62,13 @@ services:
     depends_on:
       - docker-monitor
     networks:
-      - proxy
+      - nginx-proxy
       - internal
     mem_limit: 64m
 
 # ── Networks ──────────────────────────────────────────────────────────────
 networks:
-  proxy:
+  nginx-proxy:
     external: true   # shared network owned by your existing proxy stack
   internal:
     name: monitor-internal
