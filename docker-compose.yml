@@ -1,3 +1,5 @@
+version: "3.9"
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  Docker Memory Monitor — unified compose
 #  nginx-proxy + acme-companion are assumed to already be running on the
@@ -60,13 +62,13 @@ services:
     depends_on:
       - docker-monitor
     networks:
-      - nginx-proxy
+      - proxy
       - internal
     mem_limit: 64m
 
 # ── Networks ──────────────────────────────────────────────────────────────
 networks:
-  nginx-proxy:
+  proxy:
     external: true   # shared network owned by your existing proxy stack
   internal:
     name: monitor-internal
