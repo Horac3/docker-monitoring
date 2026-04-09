@@ -1,0 +1,14 @@
+FROM python:3.12-slim
+
+LABEL description="Docker Monitor Dashboard UI"
+
+WORKDIR /app
+
+COPY dashboard.html .
+COPY dashboard_server.py .
+
+RUN mkdir -p /var/log/docker-monitor
+
+EXPOSE 8080
+
+CMD ["python", "-u", "dashboard_server.py"]
