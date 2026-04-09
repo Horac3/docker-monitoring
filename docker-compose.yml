@@ -1,0 +1,36 @@
+version: "3.9"
+
+services:
+  docker-monitor:
+    build: .
+    container_name: docker-memory-monitor
+    restart: unless-stopped
+
+    # Must mount the Docker socket so it can inspect other containers
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - monitor-logs:/var/log/docker-monitor
+
+    environment:
+      # ── Polling & thresholds ─────────────────────────────────────────
+      POLL_INTERVAL: "30"       # seconds between polls
+      ALERT_THRESHOLD: "80"     # alert when any container hits 80% of its memory limit
+      SPIKE_DELTA: "20"         # alert on a 20% jump within one poll cycle
+      COOLDOWN_SECONDS: "300"   # don't re-alert same container within 5 minutes
+
+      # ── Email (fill these in, or use a .env file) ────────────────────
+      SMTP_HOST: "smtp.gmail.com"
+      SMTP_PORT: "587"
+      SMTP_USER: "${SMTP_USER}"        # your Gmail / SMTP address
+      SMTP_PASS: "${SMTP_PASS}"        # app password (not your real password)
+      ALERT_TO:  "${ALERT_TO}"         # recipient address
+      ALERT_FROM: "${SMTP_USER}"
+
+      # ── Logging ──────────────────────────────────────────────────────
+      LOG_LEVEL: "INFO"
+
+    # Give the monitor itself a small memory budget
+    mem_limit: 128m
+
+volumes:
+  monitor-logs:
