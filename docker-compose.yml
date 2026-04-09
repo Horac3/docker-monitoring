@@ -1,36 +1,78 @@
 version: "3.9"
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  Docker Memory Monitor — unified compose
+#  nginx-proxy + acme-companion are assumed to already be running on the
+#  shared "proxy" network (same setup as BillFlow).
+#
+#  Dashboard:  https://monitoring.never9to5ive.com
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 services:
+
+  # ── Monitor daemon (no HTTP — no domain needed) ───────────────────────────
   docker-monitor:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: docker-memory-monitor
     restart: unless-stopped
-
-    # Must mount the Docker socket so it can inspect other containers
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - monitor-logs:/var/log/docker-monitor
-
     environment:
       # ── Polling & thresholds ─────────────────────────────────────────
-      POLL_INTERVAL: "30"       # seconds between polls
-      ALERT_THRESHOLD: "80"     # alert when any container hits 80% of its memory limit
-      SPIKE_DELTA: "20"         # alert on a 20% jump within one poll cycle
-      COOLDOWN_SECONDS: "300"   # don't re-alert same container within 5 minutes
+      POLL_INTERVAL:    "30"
+      ALERT_THRESHOLD:  "80"
+      SPIKE_DELTA:      "20"
+      COOLDOWN_SECONDS: "300"
 
-      # ── Email (fill these in, or use a .env file) ────────────────────
-      SMTP_HOST: "smtp.gmail.com"
-      SMTP_PORT: "587"
-      SMTP_USER: "${SMTP_USER}"        # your Gmail / SMTP address
-      SMTP_PASS: "${SMTP_PASS}"        # app password (not your real password)
-      ALERT_TO:  "${ALERT_TO}"         # recipient address
+      # ── Email ────────────────────────────────────────────────────────
+      SMTP_HOST:  "smtp.gmail.com"
+      SMTP_PORT:  "587"
+      SMTP_USER:  "${SMTP_USER}"
+      SMTP_PASS:  "${SMTP_PASS}"
+      ALERT_TO:   "${ALERT_TO}"
       ALERT_FROM: "${SMTP_USER}"
 
       # ── Logging ──────────────────────────────────────────────────────
       LOG_LEVEL: "INFO"
-
-    # Give the monitor itself a small memory budget
+    networks:
+      - internal
     mem_limit: 128m
 
+  # ── Dashboard UI ──────────────────────────────────────────────────────────
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+    container_name: docker-monitor-dashboard
+    restart: unless-stopped
+    volumes:
+      - monitor-logs:/var/log/docker-monitor:ro
+    environment:
+      DASHBOARD_PORT: "8080"
+      LOG_DIR:        "/var/log/docker-monitor"
+
+      # ── Picked up by nginx-proxy + acme-companion automatically ──────
+      VIRTUAL_HOST:      "monitoring.never9to5ive.com"
+      VIRTUAL_PORT:      "8080"
+      LETSENCRYPT_HOST:  "monitoring.never9to5ive.com"
+      LETSENCRYPT_EMAIL: "${LETSENCRYPT_EMAIL}"
+    depends_on:
+      - docker-monitor
+    networks:
+      - proxy
+      - internal
+    mem_limit: 64m
+
+# ── Networks ──────────────────────────────────────────────────────────────
+networks:
+  proxy:
+    external: true   # shared network owned by your existing proxy stack
+  internal:
+    name: monitor-internal
+
+# ── Volumes ───────────────────────────────────────────────────────────────
 volumes:
   monitor-logs:
