@@ -1,5 +1,3 @@
-version: "3.9"
-
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  Resource Monitor — unified compose
 #  nginx-proxy + acme-companion are running on the shared "proxy" network.
@@ -50,7 +48,7 @@ services:
       # ── Logging ──────────────────────────────────────────────────────
       LOG_LEVEL: "INFO"
     networks:
-      - proxy
+      - nginx-proxy
       - internal
     mem_limit: 192m
 
@@ -85,13 +83,13 @@ services:
     depends_on:
       - docker-monitor
     networks:
-      - proxy
+      - nginx-proxy
       - internal
     mem_limit: 64m
 
 # ── Networks ──────────────────────────────────────────────────────────────
 networks:
-  proxy:
+  nginx-proxy:
     external: true
   internal:
     name: monitor-internal
