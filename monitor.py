@@ -37,10 +37,20 @@ SMTP_PASS        = os.getenv("SMTP_PASS",  "")
 ALERT_TO         = os.getenv("ALERT_TO",   "")
 ALERT_FROM       = os.getenv("ALERT_FROM", "") or SMTP_USER
 
+# ── Email rate limits ─────────────────────────────────────────────────────────
+# Gmail free accounts: 500/day. Workspace: 2000/day.
+# We default to 480 to stay safely under the 500 limit.
+# Set EMAIL_DAILY_LIMIT=1900 if you're on Workspace.
+EMAIL_DAILY_LIMIT  = int(os.getenv("EMAIL_DAILY_LIMIT",  "480"))
+EMAIL_HOURLY_LIMIT = int(os.getenv("EMAIL_HOURLY_LIMIT", "40"))
+# Warn when this fraction of the daily quota is used (default 80%)
+EMAIL_QUOTA_WARN   = float(os.getenv("EMAIL_QUOTA_WARN", "0.80"))
+
 LOG_LEVEL        = os.getenv("LOG_LEVEL",  "INFO").upper()
 LOG_FILE         = os.getenv("LOG_FILE",   "/var/log/docker-monitor/monitor.log")
 SNAPSHOT_PATH    = Path("/var/log/docker-monitor/latest.json")
 ALERT_LOG_PATH   = Path("/var/log/docker-monitor/alerts.json")
+EMAIL_QUOTA_PATH = Path("/var/log/docker-monitor/email_quota.json")
 SERVICES_FILE    = Path(os.getenv("SERVICES_FILE", "/etc/monitor/services.yml"))
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -77,12 +87,155 @@ def b2gb(b: int) -> float:
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# EMAIL QUOTA  (persisted to disk — survives container restarts)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#
+# Structure of email_quota.json:
+# {
+#   "day":          "2025-04-10",   # UTC date — resets when date changes
+#   "day_count":    12,             # emails sent today
+#   "hour":         "2025-04-10T14", # UTC year-month-day-hour
+#   "hour_count":   3,              # emails sent this hour
+#   "quota_warned": false           # true once the 80% warning email fires
+# }
+
+def _load_quota() -> dict:
+    try:
+        return json.loads(EMAIL_QUOTA_PATH.read_text())
+    except Exception:
+        return {"day": "", "day_count": 0, "hour": "", "hour_count": 0, "quota_warned": False}
+
+
+def _save_quota(q: dict) -> None:
+    try:
+        EMAIL_QUOTA_PATH.write_text(json.dumps(q, indent=2))
+    except Exception as exc:
+        log.error("Failed to save email quota: %s", exc)
+
+
+def _quota_key_day() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def _quota_key_hour() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H")
+
+
+def _check_quota() -> tuple[bool, str]:
+    """
+    Returns (allowed, reason).
+    allowed=True  → quota has room, proceed.
+    allowed=False → quota exceeded, reason explains which limit was hit.
+    Also resets stale windows and fires a warning email at EMAIL_QUOTA_WARN%.
+    """
+    q = _load_quota()
+    now_day  = _quota_key_day()
+    now_hour = _quota_key_hour()
+
+    # Reset daily window when the UTC date rolls over
+    if q["day"] != now_day:
+        q["day"]          = now_day
+        q["day_count"]    = 0
+        q["quota_warned"] = False
+
+    # Reset hourly window when the hour rolls over
+    if q["hour"] != now_hour:
+        q["hour"]       = now_hour
+        q["hour_count"] = 0
+
+    # Check limits BEFORE incrementing
+    if q["day_count"] >= EMAIL_DAILY_LIMIT:
+        resets_in = _seconds_until_midnight()
+        reason = (
+            f"Daily email limit reached ({q['day_count']}/{EMAIL_DAILY_LIMIT}). "
+            f"Quota resets in {resets_in // 3600}h {(resets_in % 3600) // 60}m."
+        )
+        log.warning("EMAIL QUOTA: %s", reason)
+        _save_quota(q)
+        return False, reason
+
+    if q["hour_count"] >= EMAIL_HOURLY_LIMIT:
+        reason = (
+            f"Hourly email limit reached ({q['hour_count']}/{EMAIL_HOURLY_LIMIT}). "
+            f"Resets at the top of the next hour."
+        )
+        log.warning("EMAIL QUOTA: %s", reason)
+        _save_quota(q)
+        return False, reason
+
+    # Increment counters
+    q["day_count"]  += 1
+    q["hour_count"] += 1
+    _save_quota(q)
+
+    # Fire a warning email when we cross EMAIL_QUOTA_WARN of the daily limit
+    # (but only once per day — quota_warned flag prevents repeats)
+    warn_threshold = int(EMAIL_DAILY_LIMIT * EMAIL_QUOTA_WARN)
+    if not q["quota_warned"] and q["day_count"] >= warn_threshold:
+        _send_quota_warning(q["day_count"], EMAIL_DAILY_LIMIT)
+        q["quota_warned"] = True
+        _save_quota(q)
+
+    return True, ""
+
+
+def _seconds_until_midnight() -> int:
+    """Seconds until next UTC midnight."""
+    from datetime import timedelta
+    now = datetime.now(timezone.utc)
+    tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    return int((tomorrow - now).total_seconds())
+
+
+def _send_quota_warning(used: int, limit: int) -> None:
+    """Send a one-time warning when approaching the daily quota."""
+    pct = round(used / limit * 100)
+    resets_in = _seconds_until_midnight()
+    html = f"""
+    <html><body style="background:#0d0d0d;color:#e0e0e0;font-family:sans-serif;padding:24px">
+      <h2 style="color:#f59e0b">⚠ Email Quota Warning</h2>
+      <p style="color:#888">{utcnow()}</p>
+      <p>Resource Monitor has used <strong style="color:#f59e0b">{used} of {limit}</strong>
+         emails today ({pct}% of daily quota).</p>
+      <p>Further alerts will be suppressed once the limit is reached.<br>
+         Quota resets in <strong>{resets_in // 3600}h {(resets_in % 3600) // 60}m</strong> (UTC midnight).</p>
+      <p style="margin-top:16px">To adjust limits, set in your <code>.env</code>:<br>
+         <code>EMAIL_DAILY_LIMIT=480</code> (current)<br>
+         <code>EMAIL_HOURLY_LIMIT=40</code> (current)</p>
+      <p style="color:#555;font-size:12px;margin-top:24px">Resource Monitor · automatic quota alert</p>
+    </body></html>"""
+    # Bypass the normal quota check — this warning must always get through
+    ok, err = _smtp_send(f"⚠ Email quota at {pct}% — Resource Monitor", html)
+    if ok:
+        log.warning("Email quota warning sent (%d/%d used)", used, limit)
+    else:
+        log.error("Failed to send quota warning: %s", err)
+
+
+def get_quota_status() -> dict:
+    """Return current quota state for the snapshot (visible in dashboard)."""
+    q = _load_quota()
+    now_day  = _quota_key_day()
+    now_hour = _quota_key_hour()
+    day_count  = q["day_count"]  if q["day"]  == now_day  else 0
+    hour_count = q["hour_count"] if q["hour"] == now_hour else 0
+    return {
+        "day_count":    day_count,
+        "day_limit":    EMAIL_DAILY_LIMIT,
+        "day_pct":      round(day_count / EMAIL_DAILY_LIMIT * 100, 1),
+        "hour_count":   hour_count,
+        "hour_limit":   EMAIL_HOURLY_LIMIT,
+        "resets_in_s":  _seconds_until_midnight(),
+    }
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # EMAIL
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 def _smtp_send(subject: str, html: str) -> tuple[bool, str]:
     """
     Low-level send. Returns (success, error_message).
-    Does NOT check SMTP_USER/PASS — caller must validate.
+    Does NOT check quota — caller must gate through _check_quota() first.
     """
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
@@ -110,23 +263,51 @@ def _smtp_send(subject: str, html: str) -> tuple[bool, str]:
 
 
 def send_email(subject: str, html: str, alert_key: str = "") -> bool:
-    """Send email and append result to the alert log. Returns True on success."""
+    """
+    Send an alert email, gated by quota and SMTP config checks.
+    Returns True on successful delivery.
+    Appends result to alerts.json regardless of outcome.
+    """
     if not all([SMTP_USER, SMTP_PASS, ALERT_TO]):
         log.warning(
             "Email skipped — SMTP not fully configured. "
             "Set SMTP_USER, SMTP_PASS and ALERT_TO in your .env"
         )
-        _append_alert_log(subject, "misconfigured", "SMTP_USER/SMTP_PASS/ALERT_TO not set", alert_key)
+        _append_alert_log(subject, "misconfigured",
+                          "SMTP_USER/SMTP_PASS/ALERT_TO not set", alert_key)
+        return False
+
+    # Check quota before attempting to send
+    allowed, reason = _check_quota()
+    if not allowed:
+        log.warning("Email suppressed (quota): %s", subject)
+        _append_alert_log(subject, "quota_exceeded", reason, alert_key)
         return False
 
     ok, err = _smtp_send(subject, html)
     if ok:
-        log.info("Email sent → %s  subject: %s", ALERT_TO, subject)
+        log.info("Email sent → %s  [%s]", ALERT_TO, subject)
         _append_alert_log(subject, "sent", "", alert_key)
     else:
         log.error("Email FAILED: %s", err)
         _append_alert_log(subject, "failed", err, alert_key)
+        # If Gmail told us the daily limit is exceeded, mark quota as full
+        # so we stop attempting until midnight rather than keep hitting SMTP
+        if "Daily user sending limit exceeded" in err or "4.5.5" in err or "5.4.5" in err:
+            log.error(
+                "Gmail daily sending limit hit via SMTP response. "
+                "Marking quota as exhausted until UTC midnight."
+            )
+            _exhaust_quota()
     return ok
+
+
+def _exhaust_quota() -> None:
+    """Force the daily counter to the limit so no more attempts are made today."""
+    q = _load_quota()
+    q["day"]       = _quota_key_day()
+    q["day_count"] = EMAIL_DAILY_LIMIT
+    _save_quota(q)
 
 
 def test_email() -> None:
@@ -135,18 +316,37 @@ def test_email() -> None:
         log.warning("Startup email test skipped — SMTP not configured.")
         return
     log.info("Sending startup test email to %s …", ALERT_TO)
+    q = get_quota_status()
     html = f"""
     <html><body style="background:#0d0d0d;color:#e0e0e0;font-family:sans-serif;padding:24px">
       <h2 style="color:#22d3a5">Resource Monitor — startup test</h2>
       <p>This email confirms that alert delivery is working correctly.</p>
-      <p style="color:#888;font-size:12px">Started at {utcnow()}<br>
-      Polling every {POLL_INTERVAL}s · Memory threshold {ALERT_THRESHOLD}%</p>
+      <p style="color:#888;font-size:12px">
+        Started at {utcnow()}<br>
+        Polling every {POLL_INTERVAL}s · Memory threshold {ALERT_THRESHOLD}%<br>
+        Email quota: {q['day_count']}/{q['day_limit']} used today ·
+        {q['hour_count']}/{q['hour_limit']} this hour
+      </p>
     </body></html>"""
+    # Test email bypasses quota — it's one email on startup, not an alert loop
     ok, err = _smtp_send("Resource Monitor started — email delivery test", html)
     if ok:
-        log.info("Startup test email delivered successfully.")
+        # Count it against quota so the startup test is reflected accurately
+        quota = _load_quota()
+        today = _quota_key_day()
+        if quota["day"] == today:
+            quota["day_count"] += 1
+        else:
+            quota["day"] = today
+            quota["day_count"] = 1
+        _save_quota(quota)
+        log.info("Startup test email delivered. Quota: %d/%d today.",
+                 quota["day_count"], EMAIL_DAILY_LIMIT)
     else:
-        log.error("Startup test email FAILED: %s  — alerts will not reach you until this is fixed.", err)
+        log.error(
+            "Startup test email FAILED: %s — alerts will not reach you "
+            "until this is fixed.", err
+        )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -291,8 +491,61 @@ def get_container_stats(container) -> dict | None:
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# SERVICE CHECKS
+# PROCESS LIST
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# How many top processes to include in the snapshot
+PROCESS_LIMIT = int(os.getenv("PROCESS_LIMIT", "60"))
+
+def get_processes(container_names: set[str]) -> list[dict]:
+    """
+    Return the top PROCESS_LIMIT processes by CPU usage.
+    Each entry includes whether it belongs to a known Docker container
+    so the dashboard can offer a stop button for those.
+
+    We call cpu_percent(interval=None) — non-blocking, uses the delta
+    since the last call. The first call per-process always returns 0.0;
+    subsequent polls return accurate values. This is intentional — we
+    never block the poll loop for a CPU measurement interval.
+    """
+    procs = []
+    total_ram = psutil.virtual_memory().total
+
+    for p in psutil.process_iter([
+        "pid", "name", "status", "cpu_percent",
+        "memory_info", "memory_percent", "username", "cmdline",
+    ]):
+        try:
+            info = p.info
+            rss  = info["memory_info"].rss if info["memory_info"] else 0
+            cmd  = " ".join(info["cmdline"] or []) if info["cmdline"] else info["name"] or ""
+            # Truncate very long command lines
+            if len(cmd) > 120:
+                cmd = cmd[:117] + "..."
+
+            # Check if this process name matches a running container name
+            # Docker container processes typically appear as the container name
+            # or as containerd-shim / docker-containerd entries referencing it
+            is_docker = info["name"] in container_names
+
+            procs.append({
+                "pid":        info["pid"],
+                "name":       info["name"] or "",
+                "cmd":        cmd,
+                "status":     info["status"] or "",
+                "cpu_pct":    round(info["cpu_percent"] or 0.0, 2),
+                "mem_pct":    round(info["memory_percent"] or 0.0, 2),
+                "rss_mb":     b2mb(rss),
+                "username":   info["username"] or "",
+                "is_docker":  is_docker,
+                "container_name": info["name"] if is_docker else None,
+            })
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+
+    # Sort by CPU descending, take top N
+    procs.sort(key=lambda x: x["cpu_pct"], reverse=True)
+    return procs[:PROCESS_LIMIT]
 def load_services() -> list[dict]:
     if not SERVICES_FILE.exists():
         return []
@@ -612,18 +865,24 @@ def poll_once(client: docker.DockerClient) -> None:
                  host["disk"]["usage_pct"], host["memory"]["swap_pct"])
         check_host_alerts(host)
 
-    # 3. Service checks (reload config each poll — no restart needed)
+    # 3. Process list (all running processes, tagged with docker membership)
+    container_names = {s["container_name"] for s in ct_stats}
+    processes = get_processes(container_names)
+
+    # 4. Service checks (reload config each poll — no restart needed)
     svc_configs = load_services()
     svc_results = run_service_checks(svc_configs) if svc_configs else []
     if svc_configs:
         alert_services(svc_results, svc_configs)
 
-    # 4. Write snapshot
+    # 5. Write snapshot
     snapshot = {
-        "polled_at":  utcnow(),
-        "containers": ct_stats,
-        "host":       host,
-        "services":   svc_results,
+        "polled_at":    utcnow(),
+        "containers":   ct_stats,
+        "host":         host,
+        "processes":    processes,
+        "services":     svc_results,
+        "email_quota":  get_quota_status(),
     }
     try:
         SNAPSHOT_PATH.write_text(json.dumps(snapshot, indent=2))

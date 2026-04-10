@@ -172,8 +172,13 @@ tbody td{padding:11px 18px;font-size:13px}
 .rec-action{font-size:11px;color:var(--text-muted);margin-top:5px;font-family:'JetBrains Mono',monospace}
 
 /* Services table */
-.svc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;padding:16px 18px}
-.svc-card{border-radius:8px;border:1px solid var(--border);padding:12px 14px;background:var(--surface2);display:flex;flex-direction:column;gap:6px}
+.svc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;padding:16px 18px}.svc-card{border-radius:8px;border:1px solid var(--border);padding:12px 14px;background:var(--surface2);display:flex;flex-direction:column;gap:6px}
+
+/* Process table */
+.proc-docker td:first-child{border-left:2px solid var(--blue)}
+.stop-btn{font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid var(--red-dim);background:var(--red-dim);color:var(--red);cursor:pointer;font-weight:600;white-space:nowrap;transition:all .15s}
+.stop-btn:hover{background:var(--red);color:#fff;border-color:var(--red)}
+.stop-btn:disabled{opacity:.4;cursor:not-allowed}
 .svc-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .svc-name{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .svc-badge{font-size:10px;padding:2px 8px;border-radius:20px;font-weight:600;white-space:nowrap;flex-shrink:0}
@@ -298,7 +303,12 @@ tbody td{padding:11px 18px;font-size:13px}
     <div class="stat-card">
       <div class="stat-lbl">Emails Sent</div>
       <div class="stat-val" id="s-emails" style="color:var(--amber)">0</div>
-      <div class="stat-sub">alerts dispatched</div>
+      <div class="stat-sub" id="s-emails-sub">alerts dispatched</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-lbl">Email Quota</div>
+      <div class="stat-val" id="s-quota" style="color:var(--green)">—</div>
+      <div class="stat-sub" id="s-quota-sub">today / daily limit</div>
     </div>
   </div>
 
@@ -479,6 +489,57 @@ tbody td{padding:11px 18px;font-size:13px}
     </div>
   </div>
 
+  <!-- Processes -->
+  <div class="section-title">Running Processes</div>
+  <div class="table-wrap" style="margin-bottom:24px">
+    <div class="table-hdr">
+      <div class="table-title">All Processes <span id="proc-count" style="font-size:11px;font-weight:400;color:var(--text-muted);margin-left:6px"></span></div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div class="sort-btns" id="proc-filter-btns">
+          <button class="sort-btn active" onclick="setProcFilter('all',this)">All</button>
+          <button class="sort-btn" onclick="setProcFilter('docker',this)">Docker</button>
+          <button class="sort-btn" onclick="setProcFilter('system',this)">System</button>
+        </div>
+        <div class="sort-btns" id="proc-sort-btns">
+          <button class="sort-btn active" onclick="setProcSort('cpu',this)">CPU</button>
+          <button class="sort-btn" onclick="setProcSort('mem',this)">RAM</button>
+          <button class="sort-btn" onclick="setProcSort('name',this)">Name</button>
+        </div>
+        <input id="proc-search" type="text" placeholder="Search…"
+          style="font-size:11px;padding:3px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);width:120px;outline:none"
+          oninput="renderProcesses(window._lastProcs)">
+      </div>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>PID</th><th>Name</th><th>User</th><th>CPU %</th>
+          <th>RAM %</th><th>RSS</th><th>Status</th><th>Command</th><th></th>
+        </tr>
+      </thead>
+      <tbody id="proc-tbody">
+        <tr><td colspan="9" class="empty">Waiting for first poll…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Stop confirmation modal (simple inline overlay) -->
+  <div id="stop-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;align-items:center;justify-content:center">
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:28px 32px;max-width:380px;width:90%;text-align:center">
+      <div style="font-size:32px;margin-bottom:12px">⚠</div>
+      <div style="font-size:15px;font-weight:600;margin-bottom:8px">Stop container?</div>
+      <div style="font-size:13px;color:var(--text-muted);margin-bottom:24px">
+        This will stop <code id="stop-name" style="background:var(--surface2);padding:2px 6px;border-radius:4px"></code>.
+        Services depending on it may go down.
+      </div>
+      <div style="display:flex;gap:10px;justify-content:center">
+        <button onclick="closeStopModal()" style="padding:8px 20px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);cursor:pointer;font-size:13px">Cancel</button>
+        <button id="stop-confirm-btn" onclick="confirmStop()" style="padding:8px 20px;border-radius:8px;border:none;background:var(--red);color:#fff;cursor:pointer;font-size:13px;font-weight:600">Stop container</button>
+      </div>
+      <div id="stop-result" style="margin-top:16px;font-size:12px;color:var(--text-muted)"></div>
+    </div>
+  </div>
+
   <!-- Recs + Emails -->
   <div class="two-col">
     <div class="panel">
@@ -488,6 +549,15 @@ tbody td{padding:11px 18px;font-size:13px}
       </div>
     </div>
     <div class="panel">
+      <div id="quota-bar-wrap" style="padding:12px 18px 0;display:none">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
+          <span style="font-size:11px;color:var(--text-muted)">Daily email quota</span>
+          <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--text-dim)" id="quota-label">—</span>
+        </div>
+        <div class="bar-track" style="height:5px;margin-bottom:12px">
+          <div id="quota-fill" class="bar-fill ok" style="width:0%"></div>
+        </div>
+      </div>
       <div class="tabs">
         <div class="tab active" onclick="switchTab('all',this)">All</div>
         <div class="tab" onclick="switchTab('sent',this)">Sent</div>
@@ -910,7 +980,34 @@ function renderServices(services) {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// REAL ALERT LOG  (read from alerts.json written by monitor.py)
+// EMAIL QUOTA DISPLAY
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function renderQuota(q) {
+  if (!q) return;
+  const pct   = q.day_pct || 0;
+  const used  = q.day_count || 0;
+  const limit = q.day_limit || 480;
+  const hUsed = q.hour_count || 0;
+  const hLim  = q.hour_limit || 40;
+
+  // Stat card
+  const qEl  = document.getElementById('s-quota');
+  const qSub = document.getElementById('s-quota-sub');
+  if (qEl)  { qEl.textContent  = `${used}/${limit}`; qEl.style.color = pct >= 80 ? 'var(--red)' : pct >= 60 ? 'var(--amber)' : 'var(--green)'; }
+  if (qSub) { qSub.textContent = `${pct}% used · ${hUsed}/${hLim} this hour`; }
+
+  // Quota bar in email panel
+  const wrap  = document.getElementById('quota-bar-wrap');
+  const fill  = document.getElementById('quota-fill');
+  const label = document.getElementById('quota-label');
+  if (wrap)  wrap.style.display = 'block';
+  if (fill)  { fill.style.width = Math.min(pct, 100) + '%'; fill.className = 'bar-fill ' + (pct >= 80 ? 'crit' : pct >= 60 ? 'warn' : 'ok'); }
+  if (label) {
+    const h = Math.floor((q.resets_in_s || 0) / 3600);
+    const m = Math.floor(((q.resets_in_s || 0) % 3600) / 60);
+    label.textContent = `${used}/${limit} · resets in ${h}h ${m}m`;
+  }
+}
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 let alertsFromDisk = [];
 
@@ -948,7 +1045,7 @@ function renderEmails() {
   const items = emailFilter === 'all'
     ? normalised
     : normalised.filter(e => e.status === emailFilter ||
-        (emailFilter === 'failed' && e.status === 'misconfigured'));
+        (emailFilter === 'failed' && (e.status === 'misconfigured' || e.status === 'quota_exceeded')));
 
   const el = document.getElementById('email-log');
   if (!items.length) {
@@ -960,23 +1057,159 @@ function renderEmails() {
     sent:          `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 2 15 22 11 13 2 9 22 2"/></svg>`,
     failed:        `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>`,
     misconfigured: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--amber)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`,
+    quota_exceeded:`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--amber)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`,
     suppressed:    `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M4.93 4.93l14.14 14.14"/></svg>`,
   };
 
   el.innerHTML = items.slice(0, 30).map(e => {
     const iconKey = SVG[e.status] ? e.status : 'failed';
-    const displayStatus = e.status === 'misconfigured' ? 'config' : e.status;
+    const badgeCls = (e.status === 'misconfigured' || e.status === 'quota_exceeded') ? 'failed' : e.status;
+    const displayStatus = e.status === 'misconfigured' ? 'config' : e.status === 'quota_exceeded' ? 'quota' : e.status;
     return `<div class="email-row">
-      <div class="e-icon ${e.status === 'misconfigured' ? 'failed' : e.status}">${SVG[iconKey]}</div>
+      <div class="e-icon ${badgeCls}">${SVG[iconKey]}</div>
       <div>
         <div class="e-subject">${e.subject}</div>
         ${e.meta ? `<div class="e-meta">${e.meta}</div>` : ''}
       </div>
       <div class="e-time">${new Date(e.time).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</div>
-      <div class="e-status ${e.status === 'misconfigured' ? 'failed' : e.status}">${displayStatus}</div>
+      <div class="e-status ${badgeCls}">${displayStatus}</div>
     </div>`;
   }).join('');
 }
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PROCESSES
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+let procFilter = 'all';
+let procSort   = 'cpu';
+let stopTarget = null;
+
+function setProcFilter(f, btn) {
+  procFilter = f;
+  document.querySelectorAll('#proc-filter-btns .sort-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  if (window._lastProcs) renderProcesses(window._lastProcs);
+}
+
+function setProcSort(s, btn) {
+  procSort = s;
+  document.querySelectorAll('#proc-sort-btns .sort-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  if (window._lastProcs) renderProcesses(window._lastProcs);
+}
+
+function renderProcesses(procs) {
+  window._lastProcs = procs;
+  if (!procs || !procs.length) {
+    document.getElementById('proc-tbody').innerHTML =
+      '<tr><td colspan="9" class="empty">No process data yet</td></tr>';
+    return;
+  }
+
+  const search = (document.getElementById('proc-search')?.value || '').toLowerCase();
+
+  let filtered = procs.filter(p => {
+    if (procFilter === 'docker' && !p.is_docker) return false;
+    if (procFilter === 'system' && p.is_docker)  return false;
+    if (search && !p.name.toLowerCase().includes(search) &&
+        !p.cmd.toLowerCase().includes(search) &&
+        !String(p.pid).includes(search)) return false;
+    return true;
+  });
+
+  filtered = [...filtered].sort((a, b) =>
+    procSort === 'name' ? a.name.localeCompare(b.name) :
+    procSort === 'mem'  ? b.mem_pct - a.mem_pct :
+                          b.cpu_pct - a.cpu_pct
+  );
+
+  document.getElementById('proc-count').textContent =
+    `(${filtered.length} shown of ${procs.length})`;
+
+  const cpuMax = Math.max(...filtered.map(p => p.cpu_pct), 0.1);
+  const memMax = Math.max(...filtered.map(p => p.mem_pct), 0.1);
+
+  document.getElementById('proc-tbody').innerHTML = filtered.map(p => {
+    const cpuBarW = Math.min((p.cpu_pct / cpuMax) * 100, 100).toFixed(1);
+    const memBarW = Math.min((p.mem_pct / memMax) * 100, 100).toFixed(1);
+    const cpuCls  = p.cpu_pct >= 50 ? 'crit' : p.cpu_pct >= 20 ? 'warn' : 'ok';
+    const memCls  = p.mem_pct >= 20 ? 'crit' : p.mem_pct >= 10 ? 'warn' : 'ok';
+    const dockerBadge = p.is_docker
+      ? `<span class="badge ok" style="margin-left:5px;font-size:9px">docker</span>` : '';
+    const stopCell = p.is_docker && p.container_name
+      ? `<button class="stop-btn" onclick="openStopModal('${p.container_name}',this)">Stop</button>`
+      : '';
+
+    return `<tr class="${p.is_docker ? 'proc-docker' : ''}">
+      <td class="mono muted" style="font-size:11px">${p.pid}</td>
+      <td><span class="mono" style="font-size:12px">${p.name}</span>${dockerBadge}</td>
+      <td class="mono muted" style="font-size:11px">${p.username}</td>
+      <td class="bar-cell">
+        <div class="bar-track"><div class="bar-fill ${cpuCls}" style="width:${cpuBarW}%"></div></div>
+        <div class="bar-lbl">${p.cpu_pct.toFixed(1)}%</div>
+      </td>
+      <td class="bar-cell">
+        <div class="bar-track"><div class="bar-fill ${memCls}" style="width:${memBarW}%"></div></div>
+        <div class="bar-lbl">${p.mem_pct.toFixed(1)}%</div>
+      </td>
+      <td class="mono muted" style="font-size:11px">${p.rss_mb} MB</td>
+      <td class="mono muted" style="font-size:11px">${p.status}</td>
+      <td style="font-size:11px;color:var(--text-muted);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${p.cmd}">${p.cmd}</td>
+      <td>${stopCell}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Stop modal ────────────────────────────────────────────────
+function openStopModal(containerName, btn) {
+  stopTarget = containerName;
+  document.getElementById('stop-name').textContent = containerName;
+  document.getElementById('stop-result').textContent = '';
+  document.getElementById('stop-confirm-btn').disabled = false;
+  document.getElementById('stop-modal').style.display = 'flex';
+}
+
+function closeStopModal() {
+  document.getElementById('stop-modal').style.display = 'none';
+  stopTarget = null;
+}
+
+async function confirmStop() {
+  if (!stopTarget) return;
+  const btn = document.getElementById('stop-confirm-btn');
+  const res = document.getElementById('stop-result');
+  btn.disabled = true;
+  btn.textContent = 'Stopping…';
+  res.textContent = '';
+  try {
+    const r = await fetch('/docker/stop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ container: stopTarget }),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      res.style.color = 'var(--green)';
+      res.textContent = data.message;
+      setTimeout(closeStopModal, 1500);
+    } else {
+      res.style.color = 'var(--red)';
+      res.textContent = data.error;
+      btn.disabled = false;
+      btn.textContent = 'Stop container';
+    }
+  } catch (e) {
+    res.style.color = 'var(--red)';
+    res.textContent = 'Request failed — ' + e.message;
+    btn.disabled = false;
+    btn.textContent = 'Stop container';
+  }
+}
+
+// Close modal on backdrop click
+document.getElementById('stop-modal')?.addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeStopModal();
+});
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // RECOMMENDATIONS
@@ -1042,6 +1275,8 @@ async function poll() {
   renderTable(ct);
   updateCharts(ct, host);
   renderServices(services);
+  renderProcesses(snap.processes || []);
+  renderQuota(snap.email_quota || null);
   generateRecs(ct, host);
   renderEmails();
   renderJson(snap);
